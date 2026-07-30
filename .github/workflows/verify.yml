@@ -1,0 +1,52 @@
+name: 掲載銘柄の全件検証
+
+on:
+  schedule:
+    # 毎月1日 09:00 JST（UTC 00:00）
+    - cron: "0 0 1 * *"
+  workflow_dispatch: {}
+  push:
+    paths:
+      - "data/picks.json"
+      - "data/resolutions.json"
+      - "scripts/**"
+
+# 検証結果を自動コミットするために書き込み権限が必要。
+# これがないと最後の git push が失敗する。
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 依存関係をインストール
+        run: pip install requests
+
+      - name: ロジックのテスト
+        run: python tests/test_core.py
+
+      - name: APIクライアントのテスト
+        run: python tests/test_client.py
+
+      - name: 全件検証
+        env:
+          JQUANTS_API_KEY: ${{ secrets.JQUANTS_API_KEY }}
+        # 要確認が1件でも残っていれば exit 1 になり、このジョブは失敗する。
+        # 緑にするには data/resolutions.json に確認結果を追記するしかない。
+        run: python scripts/verify.py
+
+      - name: 結果をコミット
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/results.json REPORT.md || true
+          git diff --staged --quiet || git commit -m "検証結果を更新 $(date +%Y-%m-%d)"
+          git push || true
